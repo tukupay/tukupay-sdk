@@ -1,0 +1,65 @@
+name: Publish Node package
+
+on:
+  push:
+    tags: ["node-v*"]
+
+permissions:
+  contents: read
+  id-token: write # lets npm verify this workflow (trusted publishing)
+
+concurrency:
+  group: node-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: node
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24 # trusted publishing needs npm 11.5.1 or later
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: node/package-lock.json
+
+      - name: Tag matches package.json
+        id: version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "node-v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+          # 0.1.0-beta.1 -> beta; 1.2.3 -> latest
+          case "$version" in
+            *-*) tag=$(echo "$version" | sed -E 's/^[^-]+-([a-zA-Z]+).*/\1/') ;;
+            *) tag=latest ;;
+          esac
+          echo "dist_tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      # Normal path: no token. npm exchanges the workflow's identity for a
+      # short-lived credential.
+      - name: Publish (trusted publishing)
+        if: ${{ env.NPM_TOKEN == '' }}
+        run: npm publish --tag "${{ steps.version.outputs.dist_tag }}" --ignore-scripts
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # First release only: npm cannot attach a trusted publisher to a package
+      # that does not exist yet.
+      - name: Publish (bootstrap token)
+        if: ${{ env.NPM_TOKEN != '' }}
+        run: npm publish --tag "${{ steps.version.outputs.dist_tag }}" --ignore-scripts
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

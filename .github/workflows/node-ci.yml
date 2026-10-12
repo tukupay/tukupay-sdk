@@ -1,0 +1,38 @@
+name: Node CI
+
+on:
+  push:
+    branches: [main]
+    paths: ["node/**", "openapi/**", ".github/workflows/node-ci.yml"]
+  pull_request:
+    paths: ["node/**", "openapi/**", ".github/workflows/node-ci.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22, 24]
+    defaults:
+      run:
+        working-directory: node
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: node/package-lock.json
+      - run: npm ci
+      - name: Generated types are up to date
+        run: npm run generate && git diff --exit-code -- src/generated
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Package loads as ESM and CommonJS
+        run: |
+          node --input-type=module -e "import { TukuPay, VERSION } from './dist/index.js'; new TukuPay({ apiKey: 'sk_test_x' }); console.log('esm', VERSION)"
+          node -e "const { TukuPay, VERSION } = require('./dist/index.cjs'); new TukuPay({ apiKey: 'sk_test_x' }); console.log('cjs', VERSION)"
