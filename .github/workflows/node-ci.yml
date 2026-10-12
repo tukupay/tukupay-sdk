@@ -6,6 +6,7 @@ on:
     paths: ["node/**", "openapi/**", ".github/workflows/node-ci.yml"]
   pull_request:
     paths: ["node/**", "openapi/**", ".github/workflows/node-ci.yml"]
+  workflow_dispatch:
 
 permissions:
   contents: read
